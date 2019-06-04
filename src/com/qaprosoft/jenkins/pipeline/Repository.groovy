@@ -39,25 +39,34 @@ class Repository {
         runnerClass =  Configuration.get("runnerClass")
     }
 
+    //register new repository
     public void register() {
         logger.info("Repository->register")
         //create only high level management jobs.
         context.node('master') {
             context.timestamps {
+                //do job
                 prepare()
                 generateCiItems()
                 clean()
             }
         }
         // execute new _trigger-<repo> to regenerate other views/jobs/etc
+        //get information about organization
         def organization = Configuration.get(Configuration.Parameter.GITHUB_ORGANIZATION)
+        //get information about github repository
         def repo = Configuration.get("repo")
+        //get information about branch
         def branch = Configuration.get("branch")
+        //form link
         def jobName = "${repo}" + "/" + "onPush-" + repo
+        //get root folder
         def jobRootFolder = Configuration.get("jobRootFolder")
+        //if root folder is not empty, form full link
         if (!isParamEmpty(jobRootFolder) && !isParamEmpty(getJenkinsFolderByName(jobRootFolder))){
             jobName = "${jobRootFolder}/" + jobName
         }
+        //create job with default parametries
         context.build job: jobName,
                 propagate: true,
                 parameters: [
@@ -77,9 +86,11 @@ class Repository {
 
     }
 
+    //prepare vars parametries
     private void prepare() {
         //[VD] do not clone repo by default. Just qps-pipeline is enough
-        //scmClient.clone(true) //do shallow clone during repo registration
+        //scmClient.clone(true)
+        // do shallow clone during repo registration
         String QPS_PIPELINE_GIT_URL = Configuration.get(Configuration.Parameter.QPS_PIPELINE_GIT_URL)
         String QPS_PIPELINE_GIT_BRANCH = Configuration.get(Configuration.Parameter.QPS_PIPELINE_GIT_BRANCH)
         scmClient.clone(QPS_PIPELINE_GIT_URL, QPS_PIPELINE_GIT_BRANCH, "qps-pipeline")
@@ -88,33 +99,46 @@ class Repository {
 
     private void generateCiItems() {
 
+        //create a labels block
         context.stage("Create Repository") {
+            //get vars parametries
             def buildNumber = Configuration.get(Configuration.Parameter.BUILD_NUMBER)
             def gitHubOrganizationParameter = Configuration.get("organization")
             def repo = Configuration.get("repo")
             def branch = Configuration.get("branch")
             def repoFolder
+            //get root foolder name from link
             def jobRootFolder = Paths.get(Configuration.get(Configuration.Parameter.JOB_NAME)).getName(0).toString()
+            //check name: management jobs or not
+            //if yes, forms link for repoFolder
             if (!"Management_Jobs".equals(jobRootFolder)) {
                 repoFolder = "${jobRootFolder}/${repo}"
             } else {
                 jobRootFolder = ''
                 if (!isParamEmpty(gitHubOrganizationParameter)){
+                    //add new gitHubOrganizationParameter
                     Configuration.set(Configuration.Parameter.GITHUB_ORGANIZATION, gitHubOrganizationParameter)
                     jobRootFolder = gitHubOrganizationParameter
+                    //find jenkins folder by jobRootFolder
                     if (isParamEmpty(getJenkinsFolderByName(jobRootFolder))){
+                        //register new object in root folder
                         registerObject("organization_folder", new FolderFactory(jobRootFolder, ""))
                     }
+                    //create link for repofolder
                     repoFolder = "${jobRootFolder}/${repo}"
                 } else {
+                    //default repo
                     repoFolder = repo
                 }
             }
             Configuration.set("jobRootFolder", jobRootFolder)
             context.currentBuild.displayName = "#${buildNumber}|${repo}|${branch}"
+            //get parametries (not default)
             def githubHost = Configuration.get(Configuration.Parameter.GITHUB_HOST)
             def githubOrganization = Configuration.get(Configuration.Parameter.GITHUB_ORGANIZATION)
+            //get creditals id
             def credentialsId = "${githubOrganization}-${repo}"
+            //update creditials
             updateJenkinsCredentials(credentialsId, "${githubOrganization} GitHub token", Configuration.get("user"), Configuration.get("token"))
 //			createPRChecker(credentialsId)
 
@@ -122,7 +146,7 @@ class Repository {
 //			 TODO: move folder and main trigger job creation onto the createRepository method
 
             // Support DEV related CI workflow
-//			TODO: analyze do we need system jobs for QA repo... maybe prametrize CreateRepository call
+//			TODO: analyze do we need system jobs for QA repo... maybe parametrize CreateRepository call
             def gitUrl = Configuration.resolveVars("${Configuration.get(Configuration.Parameter.GITHUB_HTML_URL)}/${Configuration.get("repo")}")
 
             registerObject("hooks_view", new ListViewFactory(repoFolder, 'SYSTEM', null, ".*onPush.*|.*onPullRequest.*"))
@@ -137,8 +161,10 @@ class Repository {
 
             registerObject("push_job", new PushJobFactory(repoFolder, getOnPushScript(), "onPush-" + repo, pushJobDescription, githubHost, githubOrganization, repo, branch, gitUrl))
 
+            //check job root folder: empty or not
             def launcher = isParamEmpty(jobRootFolder) ? getItemByFullName("launcher") : getItemByFullName(jobRootFolder + "/launcher")
             if (isParamEmpty(launcher)){
+                //create launcher job factory
                 registerObject("launcher_job", new LauncherJobFactory(jobRootFolder, getPipelineScript(), "launcher", "Custom job launcher"))
             }
 
@@ -156,11 +182,12 @@ class Repository {
         }
     }
 
+    //clean workspace
     private clean() {
         context.stage('Wipe out Workspace') { context.deleteDir() }
     }
 
-
+    //form pull request
     private String getOnPullRequestScript() {
         if ("QPS-Pipeline".equals(pipelineLibrary)) {
             return "@Library(\'${pipelineLibrary}\')\nimport ${runnerClass}\nnew ${runnerClass}(this).onPullRequest()"
@@ -169,6 +196,7 @@ class Repository {
         }
     }
 
+    //form script for push
     private String getOnPushScript() {
         if ("QPS-Pipeline".equals(pipelineLibrary)) {
             return "@Library(\'${pipelineLibrary}\')\nimport ${runnerClass}\nnew ${runnerClass}(this).onPush()"
@@ -177,6 +205,7 @@ class Repository {
         }
     }
 
+    //form pipeline script
     protected String getPipelineScript() {
         if ("QPS-Pipeline".equals(pipelineLibrary)) {
             return "@Library(\'${pipelineLibrary}\')\nimport ${runnerClass};\nnew ${runnerClass}(this).build()"
@@ -185,6 +214,7 @@ class Repository {
         }
     }
 
+    //add registered objects to linkedMap
     private void registerObject(name, object) {
         if (dslObjects.containsKey(name)) {
             logger.warn("WARNING! key ${name} already defined and will be replaced!")
@@ -196,6 +226,7 @@ class Repository {
 
 
 
+    //form creditials for jenkins
     public def registerCredentials(){
         context.stage("Register Credentials") {
             def user = Configuration.get("githubUser")
